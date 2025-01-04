@@ -1,0 +1,7 @@
+EXPORTS 
+	_fltused
+	_snwprintf
+	memset
+	wcsstr
+	sinf
+	__libm_sse2_sinf

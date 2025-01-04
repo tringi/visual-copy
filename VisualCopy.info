@@ -1,0 +1,64 @@
+[generator]
+	autoincrement	= true
+
+	manifestcharset	= UTF-8
+	versioncharset	= UTF-8
+
+[description]
+	product 		= Visual Copy
+	filename		= %targetfilename%
+	filedescription		= Clipboard copy operation notification accessibility extension
+	internalname		= VisualCopy
+	companyname		= TRIM CORE SOFTWARE s.r.o.
+
+	major = 0
+	minor = 8
+	patch = 0
+	build = 297
+
+[versioninfo]
+	filename	= %dir%\%internalname%-vi.rc
+	language	= 0x0409
+	codepage	= 1200
+	manifest	= true
+	dll		= false
+	fileversion	= %major%,%minor%,%patch%,%build%
+	productversion	= %major%,%minor%,%patch%,%build%
+
+[versioninfo:values]
+	InternalName	= %internalname%
+	OriginalFilename= %filename%
+	CompanyName	= %companyname%
+	LegalCopyright	= © %YEAR% %companyname%
+	FileVersion	= %major%.%minor%.%patch%.%build%
+	FileDescription	= %filedescription%
+	ProductName	= %product%
+	ProductVersion	= %major%.%minor%
+	URL		= http://www.trimcore.cz
+
+[versioninfo:ff]
+	debug		= %debug%
+	prerelease	= false
+	private		= false
+	special		= false
+
+[manifest]
+	filename	= %dir%\%internalname%.manifest
+	architecture	= %platform%
+
+	assemblyVersion		= %major%.%minor%.%patch%.%build%
+	assemblyIdentityName	= TRIMCORE.%internalname%.%filename%
+	assemblyDescription	= %filedescription%
+
+	requestedExecutionLevel	= asInvoker
+	dpiAware	= True/PM
+	dpiAwareness	= PerMonitorV2,PerMonitor
+	longPathAware	= True
+
+	supportedOS:1	= e2011457-1546-43c5-a5fe-008deee3d3f0
+	supportedOS:2	= 35138b9a-5d96-4fbd-8e2d-a2440225f93a
+	supportedOS:3	= 4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38
+	supportedOS:4	= 1f676c76-80e1-4239-95bb-83d0f6d0da78
+	supportedOS:5	= 8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a
+
+	dependentAssembly:1	= Microsoft.Windows.Common-Controls 6.0.0.0 6595b64144ccf1df
