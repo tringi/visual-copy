@@ -312,31 +312,6 @@ void Optimize () {
     SetProcessWorkingSetSize (GetCurrentProcess (), (SIZE_T) -1, (SIZE_T) -1);
 }
 
-HBRUSH CreateSolidBrushEx (COLORREF color) {
-    BITMAPINFO bi;
-
-    bi.bmiHeader.biSize = sizeof bi.bmiHeader;
-    bi.bmiHeader.biWidth = 1u;
-    bi.bmiHeader.biHeight = 1u;
-    bi.bmiHeader.biPlanes = 1u;
-    bi.bmiHeader.biBitCount = 32u;
-    bi.bmiHeader.biCompression = BI_RGB;
-    bi.bmiHeader.biSizeImage = 0u;
-    bi.bmiHeader.biXPelsPerMeter = 0u;
-    bi.bmiHeader.biYPelsPerMeter = 0u;
-    bi.bmiHeader.biClrUsed = 0u;
-    bi.bmiHeader.biClrImportant = 0u;
-
-    auto alpha = (BYTE) (color >> 24);
-
-    bi.bmiColors [0].rgbBlue = MulDiv (GetBValue (color), alpha, 0xFFu);
-    bi.bmiColors [0].rgbGreen = MulDiv (GetGValue (color), alpha, 0xFFu);
-    bi.bmiColors [0].rgbRed = MulDiv (GetRValue (color), alpha, 0xFFu);
-    bi.bmiColors [0].rgbReserved = alpha;
-
-    return CreateDIBPatternBrushPt (&bi, DIB_RGB_COLORS);
-}
-
 BOOL SetLayeredWindowAlpha (HWND hWnd, BYTE a) {
     BLENDFUNCTION bFn = { AC_SRC_OVER, 0, a, AC_SRC_ALPHA };
     UPDATELAYEREDWINDOWINFO ulw = {};
