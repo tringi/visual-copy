@@ -1,4 +1,5 @@
 EXPORTS 
+	_ftol2
 	_fltused
 	_snwprintf
 	memset

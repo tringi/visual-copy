@@ -174,7 +174,7 @@
       <ControlFlowGuard>false</ControlFlowGuard>
       <RuntimeTypeInfo>false</RuntimeTypeInfo>
       <AssemblerOutput>All</AssemblerOutput>
-      <EnableEnhancedInstructionSet>StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet>StreamingSIMDExtensions</EnableEnhancedInstructionSet>
       <FloatingPointModel>Fast</FloatingPointModel>
     </ClCompile>
     <Link>
@@ -196,7 +196,7 @@
       <MergeSections>
       </MergeSections>
       <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
-      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;advapi32.lib;comctl32.lib;shell32.lib;dwmapi.lib;winmm.lib;uuid.lib;lib\msvcrt.lib;chkstk.obj;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;advapi32.lib;comctl32.lib;shell32.lib;dwmapi.lib;uxtheme.lib;winmm.lib;uuid.lib;lib\msvcrt.lib;chkstk.obj;%(AdditionalDependencies)</AdditionalDependencies>
       <StackReserveSize>131072</StackReserveSize>
       <StackCommitSize>12288</StackCommitSize>
       <HeapReserveSize>0</HeapReserveSize>
@@ -294,7 +294,7 @@
       <MergeSections>
       </MergeSections>
       <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
-      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;advapi32.lib;comctl32.lib;shell32.lib;dwmapi.lib;winmm.lib;uuid.lib;lib\msvcrt.lib;chkstk.obj;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;advapi32.lib;comctl32.lib;shell32.lib;dwmapi.lib;uxtheme.lib;winmm.lib;uuid.lib;lib\msvcrt.lib;chkstk.obj;%(AdditionalDependencies)</AdditionalDependencies>
       <StackReserveSize>131072</StackReserveSize>
       <StackCommitSize>12288</StackCommitSize>
       <HeapReserveSize>0</HeapReserveSize>
@@ -346,7 +346,7 @@
       <MergeSections>
       </MergeSections>
       <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
-      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;advapi32.lib;comctl32.lib;shell32.lib;dwmapi.lib;winmm.lib;uuid.lib;lib\msvcrt.lib;chkstk.obj;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;advapi32.lib;comctl32.lib;shell32.lib;dwmapi.lib;uxtheme.lib;winmm.lib;uuid.lib;lib\msvcrt.lib;chkstk.obj;%(AdditionalDependencies)</AdditionalDependencies>
       <StackReserveSize>131072</StackReserveSize>
       <StackCommitSize>12288</StackCommitSize>
       <HeapReserveSize>0</HeapReserveSize>
