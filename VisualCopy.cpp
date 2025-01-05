@@ -398,13 +398,6 @@ COLORREF GetEffectColor () {
     if (!color) {
         color = GetSysColor (COLOR_HIGHLIGHT);
     }
-
-    if (auto a = (color >> 24)) {
-        color &= 0x00FFFFFF;
-        color |= ((a * RegGetSettingsValue (L"opacity")) / 255) << 24;
-    } else {
-        color |= RegGetSettingsValue (L"opacity") << 24;
-    }
     return color;
 }
 
@@ -455,147 +448,127 @@ LONG GetWindowRadius (HWND hWnd, bool & top_only) {
     return radius;
 }
 
-int FillRect (HDC hDC, const RECT & r, HBRUSH hBrush) {
-    return FillRect (hDC, &r, hBrush);
-}
-
 bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * image) {
     auto color = GetEffectColor ();
-    bool top_corners_only = false;
-    auto r = GetWindowRadius (hWnd, top_corners_only);
-    auto d = r * 2;
 
-    if (auto hBrush = CreateSolidBrushEx (color)) {
-        auto hOldBrush = SelectObject (hDC, hBrush);
-        auto hOldPen = SelectObject (hDC, GetStockObject (NULL_PEN));
+    switch (effect) {
+        case 0: { // Focus effect 
 
-        switch (effect) {
-            case 0: { // Focus effect 
+            // TODO: make elliptic (currently simple circular)
+            // TODO: vectorize
 
-                // TODO: make elliptic (currently simple circular)
-                // TODO: vectorize
+            POINT center = { size.cx / 2, size.cy / 2 };
+            auto maxdistance = sqrtf (center.x * center.x + center.y * center.y);
+            auto opacity = RegGetSettingsValue (L"opacity") / 100.0f;
 
-                POINT center = { size.cx / 2, size.cy / 2 };
-                auto maxdistance = sqrtf (center.x * center.x + center.y * center.y);
-                auto opacity = RegGetSettingsValue (L"opacity") / 100.0f;
+            for (auto y = 0L; y != (size.cy + 1) / 2; ++y) {
+                auto dy = (y - center.y) * (y - center.y);
 
-                for (auto y = 0L; y != (size.cy + 1) / 2; ++y) {
-                    auto dy = (y - center.y) * (y - center.y);
+                for (auto x = 0L; x != (size.cx + 1) / 2; ++x) {
+                    auto dx = (x - center.x) * (x - center.x);
+                    auto distance = sqrtf (dx + dy);
+                    auto alpha = distance / maxdistance;
 
-                    for (auto x = 0L; x != (size.cx + 1) / 2; ++x) {
-                        auto dx = (x - center.x) * (x - center.x);
-                        auto distance = sqrtf (dx + dy);
-                        auto alpha = distance / maxdistance;
+                    if (alpha > 0.5f) { // roughly: alpha ^ 8 * 255 > 0
 
-                        if (alpha > 0.5f) { // roughly: alpha ^ 8 * 255 > 0
+                        // alpha ^ 8
+                        alpha *= alpha;
+                        alpha *= alpha;
+                        alpha *= alpha;
 
-                            // alpha ^ 8
-                            alpha *= alpha;
-                            alpha *= alpha;
-                            alpha *= alpha;
+                        alpha *= opacity;
+                        alpha *= 255.0f;
 
-                            alpha *= opacity;
-                            alpha *= 255.0f;
+                        auto a = (UINT) alpha;
+                        if (a) {
+                            auto b = GetRValue (color) * a / 255;
+                            auto g = GetGValue (color) * a / 255;
+                            auto r = GetBValue (color) * a / 255;
+                            auto v = RGB (r, g, b) | (((BYTE) a) << 24);
 
-                            auto a = (UINT) alpha;
-                            if (a) {
-                                auto b = GetRValue (color) * a / 255;
-                                auto g = GetGValue (color) * a / 255;
-                                auto r = GetBValue (color) * a / 255;
-                                auto v = RGB (r, g, b) | (((BYTE) a) << 24);
+                            auto yO = size.cx * y;
+                            auto xR = size.cx - x - 1;
+                            auto yR = size.cx * (size.cy - y - 1);
 
-                                auto yO = size.cx * y;
-                                auto xR = size.cx - x - 1;
-                                auto yR = size.cx * (size.cy - y - 1);
-
-                                image [yO + x] = v;
-                                image [yO + xR] = v;
-                                image [yR + x] = v;
-                                image [yR + xR] = v;
-                            }
-                        }
-                    }
-                }
-
-                if (r) {
-                    auto diagonal = r * 1.41421356237309504880f;
-                    for (auto y = 0L; y != r; ++y) {
-
-                        auto yO = size.cx * (r - y - 1);
-                        auto yR = size.cx * (size.cy - (r - y - 1) - 1);
-
-                        for (auto x = 0L; x != r; ++x) {
-                            auto x0 = r - x - 1;
-                            auto xR = size.cx - (r - x - 1) - 1;
-
-                            auto distance = sqrtf (x * x + y * y);
-                            if (distance < r - 1.0f)
-                                continue;
-
-                            COLORREF v = 0;
-                            if (distance <= r) {
-                                distance -= r;
-                                distance = -distance;
-
-                                v = image [yO + x0];
-
-                                auto a = (UINT) (distance * 255.0f);
-                                auto r = GetRValue (v) * a / 255;
-                                auto g = GetGValue (v) * a / 255;
-                                auto b = GetBValue (v) * a / 255;
-                                a = (v >> 24) * a / 255;
-
-                                v = RGB (r, g, b) | (((BYTE) a) << 24);
-                            }
-
-                            image [yO + x0] = v;
+                            image [yO + x] = v;
                             image [yO + xR] = v;
-
-                            if (!top_corners_only) {
-                                image [yR + x0] = v;
-                                image [yR + xR] = v;
-                            }
+                            image [yR + x] = v;
+                            image [yR + xR] = v;
                         }
                     }
                 }
+            }
 
-                GdiFlush ();
-            } break;
 
-            case 1: // Frame effect
-                break;
+        } break;
 
-            case 2: // Full window snap
-            case 3: // Full window pulse
-                if (r) {
-                    //Pie (hDC,         0,         0,       d,       d,         r,         0,         0,         r); // top left
-                    //Pie (hDC, size.cx-d,         0, size.cx,       d, size.cx-0,         r, size.cx-r,         0); // top right
-                    //Pie (hDC,         0, size.cy-d,       d, size.cy,         0, size.cy-r,         r, size.cx-0); // bottom left
-                    //Pie (hDC, size.cx-d, size.cy-d, size.cx, size.cy, size.cx-r, size.cy-0, size.cx-0, size.cy-r); // bottom right
+        case 1: // Frame effect
+            // TODO
+            break;
 
-                    //FillRect (hDC, { r, 0, size.cx - r, r }, hBrush); // top
-                    //FillRect (hDC, { 0, r, r, size.cy - r }, hBrush); // left
-                    //FillRect (hDC, { r, size.cy - r, size.cx - r, size.cy }, hBrush); // bottom
-                    //FillRect (hDC, { size.cx - r, r, size.cx, size.cy - r }, hBrush); // right
+        case 2: // Full window snap
+        case 3: // Full window pulse
+            if (auto a = RegGetSettingsValue (L"opacity")) {
+                auto b = GetRValue (color) * a / 255;
+                auto g = GetGValue (color) * a / 255;
+                auto r = GetBValue (color) * a / 255;
 
-                    // Note: I'm not sure to which extent is RoundRect accelerated.
-                    //       FillRect is accelerated. The lines above may be much faster. Need to profile.
+                color = RGB (r, g, b) | (((BYTE) a) << 24);
 
-                    RoundRect (hDC, 0, 0, size.cx, size.cy, d, d);
-                } else {
-                    FillRect (hDC, { 0, 0, size.cx, size.cy }, hBrush);
+                auto n = size.cx * size.cy;
+                for (auto i = 0L; i != n; ++i) {
+                    image [i] = color;
                 }
-                break;
-        }
-
-        if (hOldBrush) {
-            SelectObject (hDC, hOldBrush);
-        }
-        if (hOldPen) {
-            SelectObject (hDC, hOldPen);
-        }
-        DeleteObject (hBrush);
+            }
+            break;
     }
+
+    // rounded corners
+
+    bool top_corners_only = false;
+    if (auto r = GetWindowRadius (hWnd, top_corners_only)) {
+        auto diagonal = r * 1.41421356237309504880f;
+        for (auto y = 0L; y != r; ++y) {
+
+            auto yO = size.cx * (r - y - 1);
+            auto yR = size.cx * (size.cy - (r - y - 1) - 1);
+
+            for (auto x = 0L; x != r; ++x) {
+                auto distance = sqrtf (x * x + y * y);
+                if (distance < r - 1.0f)
+                    continue;
+
+                auto x0 = r - x - 1;
+                auto xR = size.cx - (r - x - 1) - 1;
+
+                COLORREF v = 0;
+                if (distance <= r) {
+                    distance -= r;
+                    distance = -distance;
+
+                    v = image [yO + x0];
+
+                    auto a = (UINT) (distance * 255.0f);
+                    auto r = GetRValue (v) * a / 255;
+                    auto g = GetGValue (v) * a / 255;
+                    auto b = GetBValue (v) * a / 255;
+                    a = (v >> 24) * a / 255;
+
+                    v = RGB (r, g, b) | (((BYTE) a) << 24);
+                }
+
+                image [yO + x0] = v;
+                image [yO + xR] = v;
+
+                if (!top_corners_only) {
+                    image [yR + x0] = v;
+                    image [yR + xR] = v;
+                }
+            }
+        }
+    }
+
+    GdiFlush ();
     return true;
 }
 
