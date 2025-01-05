@@ -242,7 +242,7 @@ void InitRegistryKey () {
                     // defaults
                     RegSetSettingsValue (L"audio", 1);
                     RegSetSettingsValue (L"animated", 1);
-                    RegSetSettingsValue (L"opacity", 25);
+                    RegSetSettingsValue (L"opacity", 50);
                 }
             }
             RegCloseKey (hKeyTRIMCORE);
@@ -427,31 +427,31 @@ bool IsWindows11OrGreater () {
     return IsWindowsBuildOrGreater (10, 0, 22000);
 }
 
-LONG GetWindowRadius (HWND hWnd) {
+LONG GetWindowRadius (HWND hWnd, bool & top_only) {
     LONG radius = 0;
     if (!IsWindows8OrGreater ()) { // Vista and 7
         BOOL composited = FALSE;
         if (SUCCEEDED (DwmIsCompositionEnabled (&composited))) {
             if (composited) {
-                radius = 4;
-            } else {
-                // TODO: if themes are enabled and Aero.msstyles then top corners are rounded
+                radius = 8; // DPI?
+            } else
+            if (IsThemeActive ()) {
+                wchar_t filename [MAX_PATH];
+                if (GetCurrentThemeName (filename, MAX_PATH, NULL, 0, NULL, 0) == S_OK) {
+                    if (wcsstr (filename, L"Aero.msstyles")) {
+                        radius = 8; // does not depend on DPI
+                        top_only = true;
+                    }
+                }
             }
         }
     }
     if (IsWindows11OrGreater ()) {
-        radius = 7;
+        radius = 8 * GetDPI (hWnd) / 96;
+    }
 
-        /*DWM_WINDOW_CORNER_PREFERENCE preference;
-        if (SUCCEEDED (DwmGetWindowAttribute (hWnd, DWMWA_WINDOW_CORNER_PREFERENCE, &preference, sizeof preference))) {
-            // this doesn't work
-        }*/
-    }
+    // user-overriden
     radius = RegGetSettingsValue (L"force rounded corners", radius);
-    if (radius) {
-        radius *= GetDPI (hWnd);
-        radius /= 96;
-    }
     return radius;
 }
 
@@ -461,7 +461,8 @@ int FillRect (HDC hDC, const RECT & r, HBRUSH hBrush) {
 
 bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * image) {
     auto color = GetEffectColor ();
-    auto r = GetWindowRadius (hWnd);
+    bool top_corners_only = false;
+    auto r = GetWindowRadius (hWnd, top_corners_only);
     auto d = r * 2;
 
     if (auto hBrush = CreateSolidBrushEx (color)) {
@@ -477,14 +478,12 @@ bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * ima
                 POINT center = { size.cx / 2, size.cy / 2 };
                 auto maxdistance = sqrtf (center.x * center.x + center.y * center.y);
                 auto opacity = RegGetSettingsValue (L"opacity") / 100.0f;
-                auto i = 0L;
 
-                for (auto y = 0L; y != size.cy; ++y) {
-                    for (auto x = 0L; x != size.cx; ++x) {
+                for (auto y = 0L; y != (size.cy + 1) / 2; ++y) {
+                    auto dy = (y - center.y) * (y - center.y);
 
+                    for (auto x = 0L; x != (size.cx + 1) / 2; ++x) {
                         auto dx = (x - center.x) * (x - center.x);
-                        auto dy = (y - center.y) * (y - center.y);
-
                         auto distance = sqrtf (dx + dy);
                         auto alpha = distance / maxdistance;
 
@@ -496,23 +495,68 @@ bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * ima
                             alpha *= alpha;
 
                             alpha *= opacity;
+                            alpha *= 255.0f;
 
-                            if (alpha) {
-                                auto b = GetRValue (color) * alpha;
-                                auto g = GetGValue (color) * alpha;
-                                auto r = GetBValue (color) * alpha;
-                                auto a = 255.0f * alpha;
+                            auto a = (UINT) alpha;
+                            if (a) {
+                                auto b = GetRValue (color) * a / 255;
+                                auto g = GetGValue (color) * a / 255;
+                                auto r = GetBValue (color) * a / 255;
+                                auto v = RGB (r, g, b) | (((BYTE) a) << 24);
 
-                                image [i] = RGB (r, g, b) | (((BYTE) a) << 24);
+                                auto yO = size.cx * y;
+                                auto xR = size.cx - x - 1;
+                                auto yR = size.cx * (size.cy - y - 1);
+
+                                image [yO + x] = v;
+                                image [yO + xR] = v;
+                                image [yR + x] = v;
+                                image [yR + xR] = v;
                             }
                         }
-
-                        ++i;
                     }
                 }
 
                 if (r) {
-                    // TODO: apply rounded corners
+                    auto diagonal = r * 1.41421356237309504880f;
+                    for (auto y = 0L; y != r; ++y) {
+
+                        auto yO = size.cx * (r - y - 1);
+                        auto yR = size.cx * (size.cy - (r - y - 1) - 1);
+
+                        for (auto x = 0L; x != r; ++x) {
+                            auto x0 = r - x - 1;
+                            auto xR = size.cx - (r - x - 1) - 1;
+
+                            auto distance = sqrtf (x * x + y * y);
+                            if (distance < r - 1.0f)
+                                continue;
+
+                            COLORREF v = 0;
+                            if (distance <= r) {
+                                distance -= r;
+                                distance = -distance;
+
+                                v = image [yO + x0];
+
+                                auto a = (UINT) (distance * 255.0f);
+                                auto r = GetRValue (v) * a / 255;
+                                auto g = GetGValue (v) * a / 255;
+                                auto b = GetBValue (v) * a / 255;
+                                a = (v >> 24) * a / 255;
+
+                                v = RGB (r, g, b) | (((BYTE) a) << 24);
+                            }
+
+                            image [yO + x0] = v;
+                            image [yO + xR] = v;
+
+                            if (!top_corners_only) {
+                                image [yR + x0] = v;
+                                image [yR + xR] = v;
+                            }
+                        }
+                    }
                 }
 
                 GdiFlush ();
@@ -566,6 +610,9 @@ void EndEffect (HWND hWnd, WPARAM wParam) {
 LRESULT CALLBACK Tray (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
         case WM_CREATE:
+            if (!AddClipboardFormatListener (hWnd))
+                return -1;
+
             nidTray.hWnd = hWnd;
             nidTray.hIcon = (HICON) LoadImage (GetModuleHandle (NULL), MAKEINTRESOURCE (1), IMAGE_ICON,
                                                GetSystemMetrics (SM_CXSMICON), GetSystemMetrics (SM_CYSMICON), 0);
@@ -574,10 +621,7 @@ LRESULT CALLBACK Tray (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
                         L"%s %s\n%s", szInfo [6], szInfo [7], szInfo [5]);
             PostMessage (hWnd, WM_TaskbarCreated, 0, 0);
 
-            if (!AddClipboardFormatListener (hWnd))
-                return -1;
-
-            hWndOverlay = CreateWindowEx (WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST,
+            hWndOverlay = CreateWindowEx (WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST,// | WS_EX_NOREDIRECTIONBITMAP,
                                           (LPCTSTR) (std::intptr_t) aEffect, L"", WS_POPUP | WS_VISIBLE,
                                           0, 0, 0, 0, HWND_DESKTOP, NULL, (HINSTANCE) &__ImageBase, NULL);
             break;
@@ -601,14 +645,17 @@ LRESULT CALLBACK Tray (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_CLIPBOARDUPDATE:
-            if (RegGetSettingsValue (L"audio")) {
-                PlaySound (MAKEINTRESOURCE (1), (HMODULE) &__ImageBase, SND_ASYNC | SND_RESOURCE);
+            if (auto audio = RegGetSettingsValue (L"audio")) {
+                PlaySound (MAKEINTRESOURCE (audio), (HMODULE) &__ImageBase, SND_ASYNC | SND_RESOURCE);
             }
             if (auto hOwner = GetForegroundWindow ()) {
                 if (auto window = GetWindowCoordinates (hOwner)) {
 
                     if (auto hWindowDC = GetDC (hWndOverlay)) {
                         if (auto hMemoryDC = CreateCompatibleDC (hWindowDC)) {
+
+                            // TODO: cache the bitmap and reuse if settings haven't changed
+                            //       and if the window size didn't (or the effect is compatible with smaller)
 
                             BITMAPINFO info {};
                             info.bmiHeader.biSize = sizeof info;
@@ -741,9 +788,6 @@ LRESULT CALLBACK Tray (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
                     Shell_NotifyIcon (NIM_MODIFY, &nidTray);
                     break;
 
-                case 0x10:
-                    RegSetSettingsValue (L"audio", RegGetSettingsValue (L"audio") ? 0 : 1);
-                    break;
                 case 0x11:
                     RegSetSettingsValue (L"animated", RegGetSettingsValue (L"animated") ? 0 : 1);
                     break;
@@ -761,6 +805,9 @@ LRESULT CALLBACK Tray (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
                     }
                     if (id >= 0x40 && id <= 0x4F) {
                         RegSetSettingsValue (L"opacity", 5 * (id - 0x40));
+                    }
+                    if (id >= 0x60 && id <= 0x6F) {
+                        RegSetSettingsValue (L"audio", id - 0x60);
                     }
             }
             break;
@@ -784,10 +831,10 @@ LRESULT CALLBACK Tray (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
 }
 
 void TrackMenu (HWND hWnd, WPARAM wParam) {
-    CheckMenuItem (hMenu, 0x10, RegGetSettingsValue (L"audio") ? MF_CHECKED : MF_UNCHECKED);
     CheckMenuItem (hMenu, 0x11, RegGetSettingsValue (L"animated") ? MF_CHECKED : MF_UNCHECKED);
     CheckMenuRadioItem (hMenu, 0x20, 0x2F, 0x20 + RegGetSettingsValue (L"effect"), MF_BYCOMMAND);
     CheckMenuRadioItem (hMenu, 0x40, 0x4F, 0x40 + RegGetSettingsValue (L"opacity") / 5, MF_BYCOMMAND);
+    CheckMenuRadioItem (hMenu, 0x60, 0x6F, 0x60 + RegGetSettingsValue (L"audio"), MF_BYCOMMAND);
 
     if (RegGetSettingsValue (L"color")) {
         // TODO: additional colors here?
