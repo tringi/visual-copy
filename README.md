@@ -22,7 +22,7 @@ And the Debug build settings are broken.
 ## Minimal requirements
 
 * Windows Vista
-* 32-bit colors
+* 32-bit colors preferred
 * Memory usage typically peaks at about 8 MB of RAM
 
 ## TODO:
