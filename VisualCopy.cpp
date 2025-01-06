@@ -313,6 +313,7 @@ void Optimize () {
 }
 
 BOOL SetLayeredWindowAlpha (HWND hWnd, BYTE a) {
+    SIZE sizeZero = { 0, 0 };
     BLENDFUNCTION bFn = { AC_SRC_OVER, 0, a, AC_SRC_ALPHA };
     UPDATELAYEREDWINDOWINFO ulw = {};
     ulw.cbSize = sizeof ulw;
@@ -320,7 +321,6 @@ BOOL SetLayeredWindowAlpha (HWND hWnd, BYTE a) {
     ulw.dwFlags = ULW_ALPHA;
 
     if (!a) {
-        SIZE sizeZero = { 0, 0 };
         ulw.psize = &sizeZero;
     }
     return UpdateLayeredWindowIndirect (hWnd, &ulw);
@@ -427,7 +427,10 @@ bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * ima
     auto color = GetEffectColor ();
 
     switch (effect) {
-        case 0: { // Focus effect 
+        // Focus effect 
+        // Corners effect
+        case 0:
+        case 1: {
 
             // TODO: make elliptic (currently simple circular)
             // TODO: vectorize
@@ -435,6 +438,13 @@ bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * ima
             POINT center = { size.cx / 2, size.cy / 2 };
             auto maxdistance = sqrtf (center.x * center.x + center.y * center.y);
             auto opacity = RegGetSettingsValue (L"opacity") / 100.0f;
+
+            float alpha_cutout;
+            if (effect) {
+                alpha_cutout = 0.7f; // roughly: alpha ^ 16 * 255 > 0
+            } else {
+                alpha_cutout = 0.5f; // roughly: alpha ^ 8 * 255 > 0
+            }
 
             for (auto y = 0L; y != (size.cy + 1) / 2; ++y) {
                 auto dy = (y - center.y) * (y - center.y);
@@ -444,12 +454,15 @@ bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * ima
                     auto distance = sqrtf (dx + dy);
                     auto alpha = distance / maxdistance;
 
-                    if (alpha > 0.5f) { // roughly: alpha ^ 8 * 255 > 0
+                    if (alpha > alpha_cutout) { 
 
                         // alpha ^ 8
                         alpha *= alpha;
                         alpha *= alpha;
                         alpha *= alpha;
+                        if (effect) {
+                            alpha *= alpha; // make it: alpha ^ 16
+                        }
 
                         alpha *= opacity;
                         alpha *= 255.0f;
@@ -473,13 +486,7 @@ bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * ima
                     }
                 }
             }
-
-
         } break;
-
-        case 1: // Frame effect
-            // TODO
-            break;
 
         case 2: // Full window snap
         case 3: // Full window pulse
@@ -502,6 +509,10 @@ bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * ima
 
     bool top_corners_only = false;
     if (auto r = GetWindowRadius (hWnd, top_corners_only)) {
+
+        if (r > size.cx) r = size.cx;
+        if (r > size.cy) r = size.cy;
+
         auto diagonal = r * 1.41421356237309504880f;
         for (auto y = 0L; y != r; ++y) {
 
@@ -564,6 +575,11 @@ LRESULT CALLBACK Tray (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
             nidTray.hWnd = hWnd;
             nidTray.hIcon = (HICON) LoadImage (GetModuleHandle (NULL), MAKEINTRESOURCE (1), IMAGE_ICON,
                                                GetSystemMetrics (SM_CXSMICON), GetSystemMetrics (SM_CYSMICON), 0);
+
+            if (wcsstr (GetCommandLine (), L" -hidden")) { // TODO: ends with
+                nidTray.dwState = NIS_HIDDEN;
+                nidTray.dwStateMask = NIS_HIDDEN;
+            }
 
             _snwprintf (nidTray.szTip, sizeof nidTray.szTip / sizeof nidTray.szTip [0],
                         L"%s %s\n%s", szInfo [6], szInfo [7], szInfo [5]);

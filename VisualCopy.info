@@ -13,8 +13,8 @@
 
 	major = 0
 	minor = 9
-	patch = 1
-	build = 397
+	patch = 2
+	build = 406
 
 [versioninfo]
 	filename	= %dir%\%internalname%-vi.rc
@@ -33,7 +33,7 @@
 	FileVersion	= %major%.%minor%.%patch%.%build%
 	FileDescription	= %filedescription%
 	ProductName	= %product%
-	ProductVersion	= %major%.%minor%
+	ProductVersion	= %major%.%minor%.%patch%
 	URL		= http://www.trimcore.cz
 
 [versioninfo:ff]
