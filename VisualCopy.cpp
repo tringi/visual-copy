@@ -186,6 +186,13 @@ void InitVersionInfoStrings () {
     ExitProcess (ERROR_FILE_CORRUPT);
 }
 
+bool ends_with (const wchar_t * haystack, const wchar_t * needle) {
+    if (auto location = wcsstr (haystack, needle)) {
+        return *(location + wcslen (needle)) == L'\0';
+    } else
+        return false;
+}
+
 void InitTerminationMessage () {
     WM_Terminate = RegisterWindowMessage (szInfo [0]);
 
@@ -193,7 +200,7 @@ void InitTerminationMessage () {
     DWORD recipients = BSM_APPLICATIONS;
     auto cmdline = GetCommandLine ();
 
-    if (wcsstr (cmdline, L" -terminate")) { // TODO: ends with
+    if (ends_with (cmdline, L" -terminate")) {
         if (SetPrivilege (SE_TCB_NAME, true)) {
             recipients |= BSM_ALLDESKTOPS;
         }
@@ -406,7 +413,7 @@ LONG GetWindowRadius (HWND hWnd, bool & top_only) {
             if (IsThemeActive ()) {
                 wchar_t filename [MAX_PATH];
                 if (GetCurrentThemeName (filename, MAX_PATH, NULL, 0, NULL, 0) == S_OK) {
-                    if (wcsstr (filename, L"Aero.msstyles")) {
+                    if (ends_with (filename, L"Aero.msstyles")) {
                         radius = 8; // does not depend on DPI
                         top_only = true;
                     }
@@ -576,7 +583,7 @@ LRESULT CALLBACK Tray (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
             nidTray.hIcon = (HICON) LoadImage (GetModuleHandle (NULL), MAKEINTRESOURCE (1), IMAGE_ICON,
                                                GetSystemMetrics (SM_CXSMICON), GetSystemMetrics (SM_CYSMICON), 0);
 
-            if (wcsstr (GetCommandLine (), L" -hidden")) { // TODO: ends with
+            if (ends_with (GetCommandLine (), L" -hidden")) {
                 nidTray.dwState = NIS_HIDDEN;
                 nidTray.dwStateMask = NIS_HIDDEN;
             }

@@ -4,5 +4,6 @@ EXPORTS
 	_snwprintf
 	memset
 	wcsstr
+	wcslen
 	sinf
 	__libm_sse2_sinf
