@@ -436,7 +436,7 @@ bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * ima
             // TODO: vectorize
 
             POINT center = { size.cx / 2, size.cy / 2 };
-            auto maxdistance = sqrtf (center.x * center.x + center.y * center.y);
+            auto maxdistance = sqrtf (float (center.x * center.x + center.y * center.y));
             auto opacity = RegGetSettingsValue (L"opacity") / 100.0f;
 
             float alpha_cutout;
@@ -451,7 +451,7 @@ bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * ima
 
                 for (auto x = 0L; x != (size.cx + 1) / 2; ++x) {
                     auto dx = (x - center.x) * (x - center.x);
-                    auto distance = sqrtf (dx + dy);
+                    auto distance = sqrtf (float (dx + dy));
                     auto alpha = distance / maxdistance;
 
                     if (alpha > alpha_cutout) { 
@@ -520,7 +520,7 @@ bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * ima
             auto yR = size.cx * (size.cy - (r - y - 1) - 1);
 
             for (auto x = 0L; x != r; ++x) {
-                auto distance = sqrtf (x * x + y * y);
+                auto distance = sqrtf (float (x * x + y * y));
                 if (distance < r - 1.0f)
                     continue;
 
