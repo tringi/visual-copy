@@ -8,6 +8,7 @@
 #include <shellapi.h>
 #include <shlobj.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstddef>
 #include <cstdio>
@@ -66,7 +67,11 @@ void Optimize ();
 LRESULT CALLBACK Tray (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK Hook (int code, WPARAM wParam, LPARAM lParam);
 
+#ifndef _DEBUG
 void Main () {
+#else
+int CALLBACK WinMain (HINSTANCE, HINSTANCE, LPSTR, int) {
+#endif
     InitVersionInfoStrings ();
     InitTerminationMessage ();
     InitSingleInstance ();
@@ -620,6 +625,8 @@ LRESULT CALLBACK Tray (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
                 PlaySound (MAKEINTRESOURCE (audio), (HMODULE) &__ImageBase, SND_ASYNC | SND_RESOURCE);
             }
             if (auto hOwner = GetForegroundWindow ()) {
+                SetWindowPos (hWndOverlay, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
                 if (auto window = GetWindowCoordinates (hOwner)) {
 
                     if (auto hWindowDC = GetDC (hWndOverlay)) {
