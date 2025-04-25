@@ -7,6 +7,8 @@ for his [ClipPing](https://github.com/kevingosse/ClipPing) application.
 This is a pure Win32 application that adds extra animation and optionally a sound effect to the active window
 whenever clipboard content changes.
 
+Find precompiled EXE's in [/Bin](/Bin)
+
 ## Features
 
 * Minimal footprint
