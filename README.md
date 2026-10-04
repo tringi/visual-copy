@@ -1,13 +1,13 @@
 # Visual Copy
-*Highlight active window after successfull copy of data into clipboard*
+*Highlight active window after successfull copy of data into clipboard and find mouse on shake*
 
-Reimplementation of [Kevin Gosse](https://x.com/KooKiz/)'s original idea
-for his [ClipPing](https://github.com/kevingosse/ClipPing) application.
+Initially a reimplementation of [Kevin Gosse](https://x.com/KooKiz/)'s original idea
+for his [ClipPing](https://github.com/kevingosse/ClipPing) application as a pure Win32 application.
+Includes optional sound effect, and additionally can highlight mouse cursor location after shaking the mouse.
 
-This is a pure Win32 application that adds extra animation and optionally a sound effect to the active window
-whenever clipboard content changes.
+![](https://github.com/tringi/visual-copy/raw/refs/heads/main/Example.gif)
 
-Additionally it can highlight mouse cursor location after shaking the mouse a little.
+Better quality: [Example.mp4](https://github.com/tringi/visual-copy/raw/refs/heads/main/Example.mp4)
 
 Find precompiled EXE's in [/Bin](/Bin)
 
@@ -16,6 +16,7 @@ Find precompiled EXE's in [/Bin](/Bin)
 * Minimal footprint
 * Multiple different animations and settings
 * Customizable effect color
+* Customizable find mouse effect
 * Optional audio effect
 
 ## Command line parameters
