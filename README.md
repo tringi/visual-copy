@@ -7,7 +7,7 @@ Includes optional sound effect, and additionally can highlight mouse cursor loca
 
 ![](https://github.com/tringi/visual-copy/raw/refs/heads/main/Example.gif)
 
-Better quality: [Example.mp4](https://github.com/tringi/visual-copy/raw/refs/heads/main/Example.mp4)
+*Sorry for the poor quality and slowed-down GIF. See [Example.mp4](https://github.com/tringi/visual-copy/raw/refs/heads/main/Example.mp4) or...*
 
 Find precompiled EXE's in [/Bin](/Bin)
 
