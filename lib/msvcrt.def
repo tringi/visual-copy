@@ -1,9 +1,12 @@
 EXPORTS 
 	_ftol2
 	_fltused
+	_snprintf
+	_vsnprintf
 	_snwprintf
 	memset
 	wcsstr
 	wcslen
 	sinf
 	__libm_sse2_sinf
+	

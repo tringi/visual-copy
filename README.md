@@ -1,11 +1,13 @@
 # Visual Copy
-*Lightweight utility that highlights the application that successfully copied data into clipboard*
+*Highlight active window after successfull copy of data into clipboard*
 
 Reimplementation of [Kevin Gosse](https://x.com/KooKiz/)'s original idea
 for his [ClipPing](https://github.com/kevingosse/ClipPing) application.
 
 This is a pure Win32 application that adds extra animation and optionally a sound effect to the active window
 whenever clipboard content changes.
+
+Additionally it can highlight mouse cursor location after shaking the mouse a little.
 
 Find precompiled EXE's in [/Bin](/Bin)
 
@@ -34,4 +36,3 @@ Find precompiled EXE's in [/Bin](/Bin)
 
 * Create good icon. Ideally in style that'd fit also Windows 7 and 8.
 * Figure out why are artifacts sometimes left on Windows Vista/7 in 16-bit mode with Aero off.
-* Fix Debug builds.

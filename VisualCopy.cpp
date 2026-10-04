@@ -16,6 +16,7 @@
 
 #pragma warning (disable:6053) // snwprintf may not NUL-terminate
 #pragma warning (disable:26819) // unannotated fall-through
+#pragma warning (disable:28159) // GetTickCount
 
 USHORT WM_Terminate = WM_NULL;
 USHORT WM_TaskbarCreated = WM_NULL;
@@ -24,8 +25,10 @@ ATOM aTray;
 ATOM aEffect;
 HKEY hKeySettings;
 HKEY hKeyDWM;
+HWND hWndTray;
 HWND hWndOverlay;
 HMENU hMenu;
+HHOOK hMouseHook;
 HHOOK hDlgPosHook;
 COLORREF crCustomSet [16];
 
@@ -65,12 +68,13 @@ void RegSetSettingsValue (const wchar_t * name, DWORD value);
 void Optimize ();
 
 LRESULT CALLBACK Tray (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
-LRESULT CALLBACK Hook (int code, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK DlgHook (int code, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK MouseHook (int code, WPARAM wParam, LPARAM lParam);
 
 #ifndef _DEBUG
 void Main () {
 #else
-int CALLBACK WinMain (HINSTANCE, HINSTANCE, LPSTR, int) {
+int main () {
 #endif
     InitVersionInfoStrings ();
     InitTerminationMessage ();
@@ -109,13 +113,14 @@ int CALLBACK WinMain (HINSTANCE, HINSTANCE, LPSTR, int) {
     ChangeWindowMessageFilter (WM_TaskbarCreated, MSGFLT_ADD);
     ChangeWindowMessageFilter (WM_Terminate, MSGFLT_ADD);
 
-    hDlgPosHook = SetWindowsHookEx (WH_CALLWNDPROCRET, Hook, NULL, GetCurrentThreadId ());
+    hMouseHook = SetWindowsHookEx (WH_MOUSE_LL, MouseHook, NULL, 0);
+    hDlgPosHook = SetWindowsHookEx (WH_CALLWNDPROCRET, DlgHook, NULL, GetCurrentThreadId ());
 
     SetLastError (0);
     if (InitWndClasses (aTray, aEffect)) {
         InitCommonControls ();
 
-        if (CreateWindow ((LPCTSTR) (std::intptr_t) aTray, L"", WS_POPUP, 0, 0, 0, 0, HWND_DESKTOP, NULL, NULL, NULL)) {
+        if (hWndTray = CreateWindow ((LPCTSTR) (std::intptr_t) aTray, L"", WS_POPUP, 0, 0, 0, 0, HWND_DESKTOP, NULL, NULL, NULL)) {
             Optimize ();
 
             MSG message {};
@@ -354,6 +359,9 @@ void ChooseEffectColor (HWND hWnd) {
 struct Coordinates {
     POINT origin = { 0, 0 };
     SIZE  size   = { 0, 0 };
+    POINT center = { 0, 0 };
+    LONG  corners = 0;
+    bool  top_corners_only = false;
 
     explicit operator bool () const {
         return this->size.cx != 0
@@ -409,25 +417,30 @@ bool IsWindows11OrGreater () {
 
 LONG GetWindowRadius (HWND hWnd, bool & top_only) {
     LONG radius = 0;
-    if (!IsWindows8OrGreater ()) { // Vista and 7
-        BOOL composited = FALSE;
-        if (SUCCEEDED (DwmIsCompositionEnabled (&composited))) {
-            if (composited) {
-                radius = 8; // DPI?
-            } else
-            if (IsThemeActive ()) {
-                wchar_t filename [MAX_PATH];
-                if (GetCurrentThemeName (filename, MAX_PATH, NULL, 0, NULL, 0) == S_OK) {
-                    if (ends_with (filename, L"Aero.msstyles")) {
-                        radius = 8; // does not depend on DPI
-                        top_only = true;
+    // if (hWnd != GetDesktopWindow () nor WS_POPUP
+
+    if (!IsZoomed (hWnd)) { // maximized windows have square corners
+        if (!IsWindows8OrGreater ()) { // Vista and 7
+            BOOL composited = FALSE;
+            if (SUCCEEDED (DwmIsCompositionEnabled (&composited))) {
+                if (composited) {
+                    radius = 8; // DPI?
+                } else
+                if (IsThemeActive ()) {
+                    wchar_t filename [MAX_PATH];
+                    if (GetCurrentThemeName (filename, MAX_PATH, NULL, 0, NULL, 0) == S_OK) {
+                        if (ends_with (filename, L"Aero.msstyles")) {
+                            radius = 8; // does not depend on DPI
+                            top_only = true;
+                        }
                     }
                 }
             }
         }
-    }
-    if (IsWindows11OrGreater ()) {
-        radius = 8 * GetDPI (hWnd) / 96;
+        if (IsWindows11OrGreater ()) {
+            radius = 8 * GetDPI (hWnd) / 96;
+            // TODO: not if DWM effect mode is disabled
+        }
     }
 
     // user-overriden
@@ -435,73 +448,118 @@ LONG GetWindowRadius (HWND hWnd, bool & top_only) {
     return radius;
 }
 
-bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * image) {
+enum class Effect : DWORD {
+    Focus = 0,
+    Corners = 1,
+    Snap = 2,
+    Pulse = 3,
+    End = 16, // non-animated effect timer only
+    MouseFind = 17,
+    MouseShakeEval = 18, // delay timer for MouseFind only
+};
+
+bool GenerateEffect (HDC hDC, HWND hWnd, Coordinates coords, Effect effect, COLORREF * image) {
     auto color = GetEffectColor ();
 
     switch (effect) {
-        // Focus effect 
-        // Corners effect
-        case 0:
-        case 1: {
+        using enum Effect;
 
+        case Focus:
+        case Corners:
+        case MouseFind:
+        {
             // TODO: make elliptic (currently simple circular)
             // TODO: vectorize
 
-            POINT center = { size.cx / 2, size.cy / 2 };
-            auto maxdistance = sqrtf (float (center.x * center.x + center.y * center.y));
+            auto maxdistance = sqrtf (float (coords.size.cx * coords.size.cx + coords.size.cy * coords.size.cy)) / 2;
             auto opacity = RegGetSettingsValue (L"opacity") / 100.0f;
+            COLORREF background = 0;
 
-            float alpha_cutout;
-            if (effect) {
-                alpha_cutout = 0.7f; // roughly: alpha ^ 16 * 255 > 0
-            } else {
-                alpha_cutout = 0.5f; // roughly: alpha ^ 8 * 255 > 0
+            if (RegGetSettingsValue (L"dim")) {
+                background = ((BYTE) (opacity * 255.0f)) << 24;
             }
 
-            for (auto y = 0L; y != (size.cy + 1) / 2; ++y) {
-                auto dy = (y - center.y) * (y - center.y);
+            float alpha_cutout;
+            switch (effect) {
+                case MouseFind:
+                    maxdistance /= 1.4142135f;
+                    switch (RegGetSettingsValue (L"circle")) {
+                        case 14: maxdistance /= 24.0f; break;
+                        case 15: maxdistance /= 12.0f; break;
+                        case 0: maxdistance /= 6.0f; break;
+                        case 1: maxdistance /= 4.0f; break;
+                        case 2: maxdistance /= 2.0f; break;
+                    }
+                    alpha_cutout = 0.5f;
+                    break;
+                case Focus:
+                    alpha_cutout = 0.5f; // roughly: alpha ^ 8 * 255 > 0
+                    break;
+                case Corners:
+                    alpha_cutout = 0.7f; // roughly: alpha ^ 16 * 255 > 0
+                    break;
+            }
 
-                for (auto x = 0L; x != (size.cx + 1) / 2; ++x) {
-                    auto dx = (x - center.x) * (x - center.x);
+            const auto symmetric = (effect != MouseFind);
+            const auto yZ = symmetric ? (coords.size.cy + 1) / 2 : coords.size.cy;
+            const auto xZ = symmetric ? (coords.size.cx + 1) / 2 : coords.size.cx;
+
+            for (auto y = 0L; y != yZ; ++y) {
+                auto dy = (y - coords.center.y) * (y - coords.center.y);
+
+                for (auto x = 0L; x != xZ; ++x) {
+                    auto dx = (x - coords.center.x) * (x - coords.center.x);
                     auto distance = sqrtf (float (dx + dy));
-                    auto alpha = distance / maxdistance;
+                    if (distance < maxdistance) {
+                        auto alpha = distance / maxdistance;
 
-                    if (alpha > alpha_cutout) { 
+                        if (alpha > alpha_cutout) {
 
-                        // alpha ^ 8
-                        alpha *= alpha;
-                        alpha *= alpha;
-                        alpha *= alpha;
-                        if (effect) {
-                            alpha *= alpha; // make it: alpha ^ 16
+                            alpha *= alpha;
+                            alpha *= alpha;
+
+                            if (effect != MouseFind) {
+                                alpha *= alpha; // alpha ^ 8
+
+                                if (effect == Corners) {
+                                    alpha *= alpha; // make it: alpha ^ 16
+                                }
+                            }
+
+                            alpha *= opacity;
+                            alpha *= 255.0f;
+
+                            auto a = (UINT) alpha;
+                            if (a) {
+                                auto b = GetRValue (color) * a / 255;
+                                auto g = GetGValue (color) * a / 255;
+                                auto r = GetBValue (color) * a / 255;
+                                auto v = RGB (r, g, b) | (((BYTE) a) << 24);
+
+                                auto yO = coords.size.cx * y;
+                                image [yO + x] = v;
+
+                                if (symmetric) {
+                                    auto xR = coords.size.cx - x - 1;
+                                    auto yR = coords.size.cx * (coords.size.cy - y - 1);
+
+                                    image [yO + xR] = v;
+                                    image [yR + x] = v;
+                                    image [yR + xR] = v;
+                                }
+                            }
                         }
-
-                        alpha *= opacity;
-                        alpha *= 255.0f;
-
-                        auto a = (UINT) alpha;
-                        if (a) {
-                            auto b = GetRValue (color) * a / 255;
-                            auto g = GetGValue (color) * a / 255;
-                            auto r = GetBValue (color) * a / 255;
-                            auto v = RGB (r, g, b) | (((BYTE) a) << 24);
-
-                            auto yO = size.cx * y;
-                            auto xR = size.cx - x - 1;
-                            auto yR = size.cx * (size.cy - y - 1);
-
-                            image [yO + x] = v;
-                            image [yO + xR] = v;
-                            image [yR + x] = v;
-                            image [yR + xR] = v;
+                    } else {
+                        if (background) { // TODO: remove this 'if' when we start reusing the buffer
+                            image [coords.size.cx * y + x] = background;
                         }
                     }
                 }
             }
         } break;
 
-        case 2: // Full window snap
-        case 3: // Full window pulse
+        case Snap:
+        case Pulse:
             if (auto a = RegGetSettingsValue (L"opacity")) {
                 auto b = GetRValue (color) * a / 255;
                 auto g = GetGValue (color) * a / 255;
@@ -509,7 +567,7 @@ bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * ima
 
                 color = RGB (r, g, b) | (((BYTE) a) << 24);
 
-                auto n = size.cx * size.cy;
+                auto n = coords.size.cx * coords.size.cy;
                 for (auto i = 0L; i != n; ++i) {
                     image [i] = color;
                 }
@@ -519,17 +577,16 @@ bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * ima
 
     // rounded corners
 
-    bool top_corners_only = false;
-    if (auto r = GetWindowRadius (hWnd, top_corners_only)) {
+    if (auto r = coords.corners) {
 
-        if (r > size.cx) r = size.cx;
-        if (r > size.cy) r = size.cy;
+        if (r > coords.size.cx) r = coords.size.cx;
+        if (r > coords.size.cy) r = coords.size.cy;
 
-        auto diagonal = r * 1.41421356237309504880f;
+        auto diagonal = r * 1.4142135f;
         for (auto y = 0L; y != r; ++y) {
 
-            auto yO = size.cx * (r - y - 1);
-            auto yR = size.cx * (size.cy - (r - y - 1) - 1);
+            auto yO = coords.size.cx * (r - y - 1);
+            auto yR = coords.size.cx * (coords.size.cy - (r - y - 1) - 1);
 
             for (auto x = 0L; x != r; ++x) {
                 auto distance = sqrtf (float (x * x + y * y));
@@ -537,7 +594,7 @@ bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * ima
                     continue;
 
                 auto x0 = r - x - 1;
-                auto xR = size.cx - (r - x - 1) - 1;
+                auto xR = coords.size.cx - (r - x - 1) - 1;
 
                 COLORREF v = 0;
                 if (distance <= r) {
@@ -558,7 +615,7 @@ bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * ima
                 image [yO + x0] = v;
                 image [yO + xR] = v;
 
-                if (!top_corners_only) {
+                if (!coords.top_corners_only) {
                     image [yR + x0] = v;
                     image [yR + xR] = v;
                 }
@@ -570,6 +627,74 @@ bool GenerateEffect (HDC hDC, HWND hWnd, SIZE size, DWORD effect, COLORREF * ima
     return true;
 }
 
+void StartEffect (HWND hWnd, Coordinates coords, Effect effect) {
+    if (auto hWindowDC = GetDC (hWndOverlay)) {
+        if (auto hMemoryDC = CreateCompatibleDC (hWindowDC)) {
+
+            // TODO: cache the bitmap and reuse if settings haven't changed
+            //       and if the window size didn't (or the effect is compatible with smaller)
+
+            BITMAPINFO info {};
+            info.bmiHeader.biSize = sizeof info;
+            info.bmiHeader.biWidth = coords.size.cx;
+            info.bmiHeader.biHeight = -coords.size.cy;
+            info.bmiHeader.biPlanes = 1;
+            info.bmiHeader.biBitCount = 32;
+            info.bmiHeader.biCompression = BI_RGB;
+
+            void * data;
+            if (auto hBitmap = CreateDIBSection (hWindowDC, &info, DIB_RGB_COLORS, &data, NULL, 0u)) {
+                auto hOldBitmap = SelectObject (hMemoryDC, hBitmap);
+                auto animated = RegGetSettingsValue (L"animated");
+
+                if (GenerateEffect (hMemoryDC, hWnd, coords, effect, (COLORREF *) data)) {
+
+                    BYTE start = 255;
+                    if (animated) {
+                        switch (effect) {
+                            default:
+                                start = 0;
+                                break;
+                            case Effect::Snap:
+                                break;
+                        }
+                    }
+
+                    POINT ptZero = { 0, 0 };
+                    BLENDFUNCTION blendFnAlpha = { AC_SRC_OVER, 0, start, AC_SRC_ALPHA };
+
+                    UPDATELAYEREDWINDOWINFO ulw = {};
+                    ulw.cbSize = sizeof ulw;
+                    ulw.pptDst = &coords.origin;
+                    ulw.pptSrc = &ptZero;
+                    ulw.psize = &coords.size;
+                    ulw.hdcSrc = hMemoryDC;
+                    ulw.pblend = &blendFnAlpha;
+                    ulw.dwFlags = ULW_ALPHA;
+
+                    SetLastError (0);
+                    if (UpdateLayeredWindowIndirect (hWndOverlay, &ulw)) {
+
+                        progress = 0;
+                        if (animated) {
+                            SetTimer (hWnd, (DWORD) effect, USER_TIMER_MINIMUM, NULL);
+                        } else {
+                            SetTimer (hWnd, (DWORD) Effect::End, GetDoubleClickTime () / 2, NULL);
+                        }
+                    }
+                }
+
+                if (hOldBitmap) {
+                    SelectObject (hMemoryDC, hOldBitmap);
+                }
+                DeleteBitmap (hBitmap);
+            }
+            DeleteDC (hMemoryDC);
+        }
+        ReleaseDC (hWndOverlay, hWindowDC);
+    }
+}
+
 void EndEffect (HWND hWnd, WPARAM wParam) {
     SetLayeredWindowAlpha (hWndOverlay, 0);
     KillTimer (hWnd, wParam);
@@ -577,6 +702,52 @@ void EndEffect (HWND hWnd, WPARAM wParam) {
         Optimize (); // expensive on older OSs for some reason
     }
 }
+
+class Mouse {
+    static constexpr std::size_t SIZE = 256u;
+
+    struct Sample {
+        DWORD t;
+        POINT pt;
+    };
+
+    std::size_t index = 0u;
+    Sample      history [SIZE] = {};
+
+public:
+    static constexpr float distance (const POINT & a, const POINT & b) noexcept {
+        auto x = a.x - b.x;
+        auto y = a.y - b.y;
+        return sqrtf (float (x * x) + float (y * y));
+    }
+
+    void record (DWORD t, POINT pt) {
+        this->history [++this->index % SIZE] = { t, pt };
+    }
+    bool evaluate (UINT frame, float * result) {
+        const auto now = GetTickCount ();
+        const auto oldest = 3 * GetDoubleClickTime ();
+        const auto latest = this->history [this->index % SIZE].pt;
+
+        auto p = latest;
+        auto d = 0.0f;
+
+        for (std::size_t i = 1; i != SIZE; ++i) {
+            auto s = this->history [(this->index - i) % SIZE];
+            if (now - s.t < oldest) {
+                d += this->distance (s.pt, p);
+                p = s.pt;
+            } else
+                break;
+        }
+
+        if (d > this->distance (p, latest) * 3.2f) {
+            *result = d;
+            return true;
+        } else
+            return false;
+    }
+} mouse;
 
 LRESULT CALLBACK Tray (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
@@ -597,9 +768,11 @@ LRESULT CALLBACK Tray (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
                         L"%s %s\n%s", szInfo [6], szInfo [7], szInfo [5]);
             PostMessage (hWnd, WM_TaskbarCreated, 0, 0);
 
-            hWndOverlay = CreateWindowEx (WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST,// | WS_EX_NOREDIRECTIONBITMAP,
+            hWndOverlay = CreateWindowEx (WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE,// | WS_EX_NOREDIRECTIONBITMAP,
                                           (LPCTSTR) (std::intptr_t) aEffect, L"", WS_POPUP | WS_VISIBLE,
                                           0, 0, 0, 0, HWND_DESKTOP, NULL, (HINSTANCE) &__ImageBase, NULL);
+            
+            SetProp (hWndOverlay, L"NonRudeHWND", (HANDLE) 1);
             break;
 
         case WM_DPICHANGED:
@@ -628,114 +801,98 @@ LRESULT CALLBACK Tray (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
                 SetWindowPos (hWndOverlay, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
                 if (auto window = GetWindowCoordinates (hOwner)) {
-
-                    if (auto hWindowDC = GetDC (hWndOverlay)) {
-                        if (auto hMemoryDC = CreateCompatibleDC (hWindowDC)) {
-
-                            // TODO: cache the bitmap and reuse if settings haven't changed
-                            //       and if the window size didn't (or the effect is compatible with smaller)
-
-                            BITMAPINFO info {};
-                            info.bmiHeader.biSize = sizeof info;
-                            info.bmiHeader.biWidth = window.size.cx;
-                            info.bmiHeader.biHeight = -window.size.cy;
-                            info.bmiHeader.biPlanes = 1;
-                            info.bmiHeader.biBitCount = 32;
-                            info.bmiHeader.biCompression = BI_RGB;
-
-                            void * data;
-                            if (auto hBitmap = CreateDIBSection (hWindowDC, &info, DIB_RGB_COLORS, &data, NULL, 0u)) {
-                                auto hOldBitmap = SelectObject (hMemoryDC, hBitmap);
-                                
-                                auto effect = RegGetSettingsValue (L"effect");
-                                auto animated = RegGetSettingsValue (L"animated");
-
-                                if (GenerateEffect (hMemoryDC, hOwner, window.size, effect, (COLORREF *) data)) {
-
-                                    BYTE start = 255;
-                                    if (animated) {
-                                        switch (effect) {
-                                            case 0: // Focus effect
-                                            case 1: // Frame effect
-                                            case 3: // Full window pulse
-                                                start = 0;
-                                                break;
-                                            case 2: // Full window snap
-                                                break;
-                                        }
-                                    }
-
-                                    POINT ptZero = { 0, 0 };
-                                    BLENDFUNCTION blendFnAlpha = { AC_SRC_OVER, 0, start, AC_SRC_ALPHA };
-
-                                    UPDATELAYEREDWINDOWINFO ulw = {};
-                                    ulw.cbSize = sizeof ulw;
-                                    ulw.pptDst = &window.origin;
-                                    ulw.pptSrc = &ptZero;
-                                    ulw.psize = &window.size;
-                                    ulw.hdcSrc = hMemoryDC;
-                                    ulw.pblend = &blendFnAlpha;
-                                    ulw.dwFlags = ULW_ALPHA;
-
-                                    SetLastError (0);
-                                    if (UpdateLayeredWindowIndirect (hWndOverlay, &ulw)) {
-
-                                        progress = 0;
-                                        if (animated) {
-                                            SetTimer (hWnd, 1, USER_TIMER_MINIMUM, NULL);
-                                        } else {
-                                            SetTimer (hWnd, 2, GetDoubleClickTime () / 2, NULL);
-                                        }
-                                    }
-                                }
-
-                                if (hOldBitmap) {
-                                    SelectObject (hMemoryDC, hOldBitmap);
-                                }
-                                DeleteBitmap (hBitmap);
-                            }
-                            DeleteDC (hMemoryDC);
-                        }
-                        ReleaseDC (hWndOverlay, hWindowDC);
-                    }
+                    window.corners = GetWindowRadius (hOwner, window.top_corners_only);
+                    window.center.x = window.size.cx / 2;
+                    window.center.y = window.size.cy / 2;
+                    
+                    StartEffect (hWnd, window, (Effect) RegGetSettingsValue (L"effect"));
                 }
             }
             break;
 
         case WM_TIMER:
-            switch (wParam) {
-                case 1:
-                    switch (RegGetSettingsValue (L"effect")) {
-                        case 0: // Focus effect
-                        case 1: // Frame effect
-                        case 3: // Full window pulse
-                            if (progress < 255) {
-                                progress += 8; // 0.32s ...TODO: change to GetDoubleClickTime
-                                
-                                auto alpha = 255.0f * sinf (3.14159265358979323846 * progress / 255.0f);
-                                if (alpha < 0.0f) {
-                                    alpha = 0.0f;
-                                }
+            switch ((Effect) wParam) {
+                using enum Effect;
 
-                                SetLayeredWindowAlpha (hWndOverlay, (BYTE) alpha);
-                            } else {
-                                EndEffect (hWnd, wParam);
-                            }
-                            break;
+                case Focus:
+                case Corners:
+                case Pulse:
+                case MouseFind:
+                    if (progress < 255) {
+                        progress += 8; // 0.32s ...TODO: change to GetDoubleClickTime
 
-                        case 2: // Full window snap
-                            if (progress < 255) {
-                                progress += 15; // 0.17s
-                                SetLayeredWindowAlpha (hWndOverlay, 255 - progress);
-                            } else {
-                                EndEffect (hWnd, wParam);
-                            }
-                            break;
+                        auto alpha = 255.0f * sinf (3.1415927f * progress / 255.0f);
+                        if (alpha < 0.0f) {
+                            alpha = 0.0f;
+                        }
+
+                        SetLayeredWindowAlpha (hWndOverlay, (BYTE) alpha);
+                    } else {
+                        EndEffect (hWnd, wParam);
                     }
                     break;
 
-                case 2:
+                case Snap:
+                    if (progress < 255) {
+                        progress += 15; // 0.17s
+                        SetLayeredWindowAlpha (hWndOverlay, 255 - progress);
+                    } else {
+                        EndEffect (hWnd, wParam);
+                    }
+                    break;
+
+                case End:
                     EndEffect (hWnd, wParam);
+                    break;
+
+                case MouseShakeEval:
+                    KillTimer (hWnd, wParam);
+                    if (RegGetSettingsValue (L"shake")) {
+
+                        // do not show over fullscreen games
+
+                        QUERY_USER_NOTIFICATION_STATE state {};
+                        SHQueryUserNotificationState (&state);
+
+                        switch (state) {
+                            case QUNS_NOT_PRESENT: // The user is not present.  Heuristic check for modes like: screen saver, locked machine, non-active FUS session
+                            case QUNS_BUSY: // The user is busy.  Heuristic check for modes like: full-screen app
+                            case QUNS_RUNNING_D3D_FULL_SCREEN: // full-screen (exlusive-mode) D3D app
+                                break;
+
+                            default:
+                            case QUNS_APP: // App-mode application
+                            case QUNS_PRESENTATION_MODE: // Windows presentation mode (laptop feature) is turned on
+                            case QUNS_ACCEPTS_NOTIFICATIONS: // notifications can be freely sent
+                            case QUNS_QUIET_TIME: // We are in OOBE quiet period
+
+                                float distance;
+                                if (mouse.evaluate (GetDoubleClickTime (), &distance)) {
+
+                                    POINT pt;
+                                    if (GetCursorPos (&pt)) {
+
+                                        MONITORINFO monitor;
+                                        monitor.cbSize = sizeof monitor;
+                                        if (GetMonitorInfo (MonitorFromPoint (pt, MONITOR_DEFAULTTONEAREST), &monitor)) {
+
+                                            Coordinates coords;
+                                            coords.origin.x = monitor.rcMonitor.left;
+                                            coords.origin.y = monitor.rcMonitor.top;
+                                            coords.size.cx = monitor.rcMonitor.right - monitor.rcMonitor.left;
+                                            coords.size.cy = monitor.rcMonitor.bottom - monitor.rcMonitor.top;
+                                            coords.center.x = pt.x - monitor.rcMonitor.left;
+                                            coords.center.y = pt.y - monitor.rcMonitor.top;
+
+                                            if (distance > mouse.distance (coords.origin, { monitor.rcMonitor.right, monitor.rcMonitor.bottom }) / 4.0f) {
+                                                SetWindowPos (hWndOverlay, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                                                StartEffect (hWnd, coords, Effect::MouseFind);
+                                            }
+                                        }
+                                    }
+                                }
+                        }
+                    }
                     break;
             }
             break;
@@ -769,6 +926,12 @@ LRESULT CALLBACK Tray (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
                 case 0x11:
                     RegSetSettingsValue (L"animated", RegGetSettingsValue (L"animated") ? 0 : 1);
                     break;
+                case 0x12:
+                    RegSetSettingsValue (L"shake", RegGetSettingsValue (L"shake") ? 0 : 1);
+                    break;
+                case 0x13:
+                    RegSetSettingsValue (L"dim", RegGetSettingsValue (L"dim") ? 0 : 1);
+                    break;
 
                 case 0x30:
                     RegSetSettingsValue (L"color", 0);
@@ -783,6 +946,9 @@ LRESULT CALLBACK Tray (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
                     }
                     if (id >= 0x40 && id <= 0x4F) {
                         RegSetSettingsValue (L"opacity", 5 * (id - 0x40));
+                    }
+                    if (id >= 0x50 && id <= 0x5F) {
+                        RegSetSettingsValue (L"circle", id - 0x50);
                     }
                     if (id >= 0x60 && id <= 0x6F) {
                         RegSetSettingsValue (L"audio", id - 0x60);
@@ -810,9 +976,12 @@ LRESULT CALLBACK Tray (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
 
 void TrackMenu (HWND hWnd, WPARAM wParam) {
     CheckMenuItem (hMenu, 0x11, RegGetSettingsValue (L"animated") ? MF_CHECKED : MF_UNCHECKED);
+    CheckMenuItem (hMenu, 0x12, RegGetSettingsValue (L"shake") ? MF_CHECKED : MF_UNCHECKED);
+    CheckMenuItem (hMenu, 0x13, RegGetSettingsValue (L"dim") ? MF_CHECKED : MF_UNCHECKED);
     CheckMenuRadioItem (hMenu, 0x20, 0x2F, 0x20 + RegGetSettingsValue (L"effect"), MF_BYCOMMAND);
     CheckMenuRadioItem (hMenu, 0x40, 0x4F, 0x40 + RegGetSettingsValue (L"opacity") / 5, MF_BYCOMMAND);
     CheckMenuRadioItem (hMenu, 0x60, 0x6F, 0x60 + RegGetSettingsValue (L"audio"), MF_BYCOMMAND);
+    CheckMenuRadioItem (hMenu, 0x50, 0x5F, 0x50 + RegGetSettingsValue (L"circle"), MF_BYCOMMAND);
 
     if (RegGetSettingsValue (L"color")) {
         // TODO: additional colors here?
@@ -862,7 +1031,7 @@ UINT GetTaskbarAlignment () {
     return ABE_BOTTOM;
 }
 
-LRESULT CALLBACK Hook (int code, WPARAM wParam, LPARAM lParam) {
+LRESULT CALLBACK DlgHook (int code, WPARAM wParam, LPARAM lParam) {
     if ((code == HC_ACTION)
             && (wParam == 0)
             && (reinterpret_cast <CWPRETSTRUCT *> (lParam)->message == WM_INITDIALOG)) {
@@ -903,6 +1072,16 @@ LRESULT CALLBACK Hook (int code, WPARAM wParam, LPARAM lParam) {
                     rParent.left + rDialog.left, rParent.top + rDialog.top,
                     rDialog.right - rDialog.left, rDialog.bottom - rDialog.top,
                     TRUE);
+    }
+    return CallNextHookEx (NULL, code, wParam, lParam);
+}
+
+LRESULT CALLBACK MouseHook (int code, WPARAM wParam, LPARAM lParam) {
+    if ((code == HC_ACTION) && (wParam == WM_MOUSEMOVE)) {
+        if (auto data = reinterpret_cast <MSLLHOOKSTRUCT *> (lParam)) {
+            mouse.record (data->time, data->pt);
+            SetTimer (hWndTray, (UINT_PTR) Effect::MouseShakeEval, GetDoubleClickTime (), NULL);
+        }
     }
     return CallNextHookEx (NULL, code, wParam, lParam);
 }

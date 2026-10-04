@@ -11,10 +11,10 @@
 	internalname		= VisualCopy
 	companyname		= TRIM CORE SOFTWARE s.r.o.
 
-	major = 0
-	minor = 9
-	patch = 4
-	build = 434
+	major = 2
+	minor = 0
+	patch = 0
+	build = 585
 
 [versioninfo]
 	filename	= %dir%\%internalname%-vi.rc
