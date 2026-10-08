@@ -490,7 +490,7 @@ bool GenerateEffect (HDC hDC, HWND hWnd, Coordinates coords, Effect effect, COLO
                         case 1: maxdistance /= 4.0f; break;
                         case 2: maxdistance /= 2.0f; break;
                     }
-                    alpha_cutout = 0.5f;
+                    alpha_cutout = 0.3f; // roughly: alpha ^ 4 * 255 > 0
                     break;
                 case Focus:
                     alpha_cutout = 0.5f; // roughly: alpha ^ 8 * 255 > 0
